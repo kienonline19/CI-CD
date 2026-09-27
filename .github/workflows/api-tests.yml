@@ -1,0 +1,30 @@
+name: API tests with Newman
+
+on: push
+
+jobs:
+  api_tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Newman
+        run: npm install --global newman
+
+      - name: Run Postman tests
+        run: |
+          newman run "JSONPLaceholder CRUD.postman_collection.json" \
+            --env-var "baseUrl=https://jsonplaceholder.typicode.com" \
+            -d users_data.csv
+
+  deploy_demo:
+    needs: api_tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Simulate deploy
+        run: echo "Tests passed — deploy is allowed"
