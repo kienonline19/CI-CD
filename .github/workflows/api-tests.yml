@@ -1,30 +1,91 @@
 name: API tests with Newman
 
-on: push
+# Chạy khi push/PR vào main, hoặc bấm chạy tay trong tab Actions
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Chỉ cấp quyền tối thiểu cho GITHUB_TOKEN
+permissions:
+  contents: read
+
+# Push liên tiếp lên cùng nhánh thì hủy lần chạy cũ, chỉ giữ lần mới nhất
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Gom cấu hình vào một chỗ, đổi file/URL không cần sửa lệnh
+env:
+  BASE_URL: https://jsonplaceholder.typicode.com
+  COLLECTION: "JSONPLaceholder CRUD.postman_collection.json"
+  DATA_FILE: users_data.csv
 
 jobs:
   api_tests:
+    name: Run Postman collection
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
+    timeout-minutes: 10
 
-      - uses: actions/setup-node@v7
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
         with:
           node-version: 22
-          package-manager-cache: false
+          package-manager-cache: false   # repo không có package-lock.json
 
-      - name: Install Newman
-        run: npm install --global newman
+      - name: Install Newman and HTML reporter
+        run: npm install --global newman newman-reporter-htmlextra
+
+      - name: Check test files exist
+        run: |
+          test -f "$COLLECTION" || { echo "::error::Không tìm thấy collection: $COLLECTION"; exit 1; }
+          test -f "$DATA_FILE"  || { echo "::error::Không tìm thấy data file: $DATA_FILE"; exit 1; }
 
       - name: Run Postman tests
         run: |
-          newman run "JSONPLaceholder CRUD.postman_collection.json" \
-            --env-var "baseUrl=https://jsonplaceholder.typicode.com" \
-            -d users_data.csv
+          mkdir -p reports
+          newman run "$COLLECTION" \
+            --env-var "baseUrl=$BASE_URL" \
+            --iteration-data "$DATA_FILE" \
+            --timeout-request 10000 \
+            --delay-request 100 \
+            --color on \
+            --reporters cli,junit,htmlextra \
+            --reporter-junit-export reports/junit.xml \
+            --reporter-htmlextra-export reports/report.html \
+            --reporter-htmlextra-title "JSONPlaceholder CRUD - Run #${{ github.run_number }}"
+
+      # Luôn upload báo cáo, kể cả khi test fail (lúc đó mới cần xem nhất)
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: newman-reports-${{ github.run_number }}
+          path: reports/
+          retention-days: 14
 
   deploy_demo:
+    name: Deploy (demo)
     needs: api_tests
+    # Chỉ deploy khi push vào main, không deploy từ pull request
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: demo   # Có thể bật "Required reviewers" trong Settings > Environments để duyệt tay
+
     steps:
       - name: Simulate deploy
-        run: echo "Tests passed — deploy is allowed"
+        run: |
+          echo "API tests passed - deploying commit ${GITHUB_SHA::7}"
+          {
+            echo "## Deploy demo"
+            echo "- Commit: \`${GITHUB_SHA::7}\`"
+            echo "- Người push: ${{ github.actor }}"
+            echo "- Kết quả: tests passed, deploy được phép"
+          } >> "$GITHUB_STEP_SUMMARY"
