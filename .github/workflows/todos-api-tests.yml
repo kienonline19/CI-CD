@@ -15,3 +15,4 @@ jobs:
       - name: Run API tests
         run: |
           postman collection run "58272286-7803faf8-7453-4177-9db0-21d1a650eae1"
+          --env-var "baseUrl=https://jsonplaceholder.typicode.com"
